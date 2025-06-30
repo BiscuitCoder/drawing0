@@ -4,7 +4,7 @@ import { useRef, useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { RotateCcw, Trophy } from "lucide-react"
+import { RotateCcw, Trophy, Coffee, Eye, EyeOff } from "lucide-react"
 
 interface Point {
   x: number
@@ -17,6 +17,9 @@ export default function CircleDrawingGame() {
   const [points, setPoints] = useState<Point[]>([])
   const [score, setScore] = useState<number | null>(null)
   const [bestScore, setBestScore] = useState<number>(0)
+  const [showMask, setShowMask] = useState(false) // 控制伪装遮罩显示
+  const [drawCount, setDrawCount] = useState(0)
+  const [allDrawings, setAllDrawings] = useState<Point[][]>([]) // 保存所有绘制的路径
 
   // 获取鼠标在canvas中的相对位置
   const getMousePos = useCallback((e: MouseEvent): Point => {
@@ -33,13 +36,24 @@ export default function CircleDrawingGame() {
   // 开始绘制
   const startDrawing = useCallback(
     (e: MouseEvent) => {
+      // 如果已经有评分，说明上一次绘制已完成，清空画布重新开始
+      if (score !== null) {
+        const canvas = canvasRef.current
+        const ctx = canvas?.getContext("2d")
+        if (canvas && ctx) {
+          ctx.fillStyle = "#0a0a0a"
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+        }
+        setAllDrawings([]) // 清空所有保存的路径
+      }
+      
       setIsDrawing(true)
-      setPoints([])
+      setPoints([]) // 清空当前绘制的点
       setScore(null)
       const pos = getMousePos(e)
       setPoints([pos])
     },
-    [getMousePos],
+    [getMousePos, score],
   )
 
   // 修复drawParticle函数的位置，将其移到组件内部但在useCallback之前
@@ -199,10 +213,14 @@ export default function CircleDrawingGame() {
     if (!isDrawing) return
 
     setIsDrawing(false)
+    setDrawCount(prev => prev + 1)
 
     // 使用函数式更新来获取最新的points
     setPoints((currentPoints) => {
       if (currentPoints.length < 10) return currentPoints
+
+      // 将当前绘制的路径保存到所有绘制中
+      setAllDrawings(prev => [...prev, [...currentPoints]])
 
       // 计算圆形完美度评分
       const circleScore = calculateCircleScore(currentPoints)
@@ -254,16 +272,122 @@ export default function CircleDrawingGame() {
     return Math.round(Math.max(1, Math.min(100, finalScore)))
   }
 
+  // 重新绘制所有保存的路径
+  const redrawAllPaths = useCallback((ctx: CanvasRenderingContext2D, paths: Point[][]) => {
+    paths.forEach((pathPoints) => {
+      if (pathPoints.length < 2) return
+
+      for (let i = 0; i < pathPoints.length - 1; i++) {
+        const progress = i / Math.max(pathPoints.length - 1, 1)
+        const hue = (progress * 360) % 360
+        
+        if (i === 0) {
+          // 第一个点
+          const p1 = pathPoints[i]
+          const p2 = pathPoints[i + 1]
+          
+          const lineWidth = 6
+          
+          // 外发光
+          ctx.save()
+          ctx.globalCompositeOperation = "screen"
+          ctx.shadowColor = `hsl(${hue}, 85%, 65%)`
+          ctx.shadowBlur = 20
+          ctx.lineWidth = lineWidth + 6
+          ctx.lineCap = "round"
+          ctx.strokeStyle = `hsla(${hue}, 85%, 65%, 0.4)`
+
+          ctx.beginPath()
+          ctx.moveTo(p1.x, p1.y)
+          ctx.lineTo(p2.x, p2.y)
+          ctx.stroke()
+          ctx.restore()
+
+          // 主线条
+          ctx.save()
+          ctx.lineWidth = lineWidth
+          ctx.lineCap = "round"
+          ctx.strokeStyle = `hsl(${hue}, 85%, 65%)`
+          ctx.shadowColor = `hsl(${hue}, 85%, 65%)`
+          ctx.shadowBlur = 12
+
+          ctx.beginPath()
+          ctx.moveTo(p1.x, p1.y)
+          ctx.lineTo(p2.x, p2.y)
+          ctx.stroke()
+          ctx.restore()
+        } else if (i >= 2) {
+          // 使用三点绘制平滑曲线
+          const p1 = pathPoints[i - 2]
+          const p2 = pathPoints[i - 1]
+          const p3 = pathPoints[i]
+
+          const cp1x = p1.x + (p2.x - p1.x) * 0.5
+          const cp1y = p1.y + (p2.y - p1.y) * 0.5
+          const cp2x = p2.x + (p3.x - p2.x) * 0.5
+          const cp2y = p2.y + (p3.y - p2.y) * 0.5
+
+          const lineWidth = 6
+          const gradient = ctx.createLinearGradient(p2.x, p2.y, p3.x, p3.y)
+          gradient.addColorStop(0, `hsl(${hue}, 85%, 65%)`)
+          gradient.addColorStop(1, `hsl(${(hue + 40) % 360}, 85%, 65%)`)
+
+          // 外发光
+          ctx.save()
+          ctx.globalCompositeOperation = "screen"
+          ctx.shadowColor = `hsl(${hue}, 85%, 65%)`
+          ctx.shadowBlur = 20
+          ctx.lineWidth = lineWidth + 6
+          ctx.lineCap = "round"
+          ctx.lineJoin = "round"
+          ctx.strokeStyle = `hsla(${hue}, 85%, 65%, 0.4)`
+
+          ctx.beginPath()
+          ctx.moveTo(cp1x, cp1y)
+          ctx.quadraticCurveTo(p2.x, p2.y, cp2x, cp2y)
+          ctx.stroke()
+          ctx.restore()
+
+          // 主线条
+          ctx.save()
+          ctx.lineWidth = lineWidth
+          ctx.lineCap = "round"
+          ctx.lineJoin = "round"
+          ctx.strokeStyle = gradient
+          ctx.shadowColor = `hsl(${hue}, 85%, 65%)`
+          ctx.shadowBlur = 12
+
+          ctx.beginPath()
+          ctx.moveTo(cp1x, cp1y)
+          ctx.quadraticCurveTo(p2.x, p2.y, cp2x, cp2y)
+          ctx.stroke()
+          ctx.restore()
+        }
+      }
+    })
+  }, [])
+
   // 清除画布
   const clearCanvas = () => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext("2d")
     if (!canvas || !ctx) return
 
+    // 重新设置canvas尺寸（这会自动清除内容）
+    const container = canvas.parentElement
+    if (container) {
+      const containerWidth = container.clientWidth
+      const aspectRatio = 5 / 3
+      canvas.width = Math.min(containerWidth - 4, 1000)
+      canvas.height = Math.min(canvas.width / aspectRatio, 600)
+    }
+
     // 设置深色背景以突出发光效果
     ctx.fillStyle = "#0a0a0a"
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
+    // 清除所有保存的绘制
+    setAllDrawings([])
     setPoints([])
     setScore(null)
     setIsDrawing(false)
@@ -271,24 +395,72 @@ export default function CircleDrawingGame() {
 
   // 获取评分等级和颜色
   const getScoreInfo = (score: number) => {
-    if (score >= 90) return { level: "完美", color: "bg-green-500" }
-    if (score >= 80) return { level: "优秀", color: "bg-blue-500" }
-    if (score >= 70) return { level: "良好", color: "bg-yellow-500" }
-    if (score >= 60) return { level: "及格", color: "bg-orange-500" }
-    return { level: "需要练习", color: "bg-red-500" }
+    if (score >= 95) return { level: "神级摸鱼手", color: "bg-purple-500", emoji: "🔥" }
+    if (score >= 90) return { level: "摸鱼大师", color: "bg-green-500", emoji: "🎯" }
+    if (score >= 80) return { level: "摸鱼高手", color: "bg-blue-500", emoji: "😎" }
+    if (score >= 70) return { level: "合格摸鱼", color: "bg-yellow-500", emoji: "👍" }
+    if (score >= 60) return { level: "菜鸟摸鱼", color: "bg-orange-500", emoji: "🤔" }
+    return { level: "摸鱼失败", color: "bg-red-500", emoji: "😅" }
   }
 
-  // 设置canvas事件监听
+  // 获取魔性的评语
+  const getMagicComment = (score: number) => {
+    if (score >= 95) return "老板看了都想给你加薪！🚀"
+    if (score >= 90) return "这圆画得比工作汇报还圆满！👑"
+    if (score >= 80) return "摸鱼技能已达到中层管理水平！📈"
+    if (score >= 70) return "勉强算个合格的社畜摸鱼手！🐟"
+    if (score >= 60) return "继续练习，早日脱离996！😴"
+    return "建议回去搬砖，摸鱼都不会！🧱"
+  }
+
+  // 获取魔性的提示语
+  const getRandomTip = () => {
+    const tips = [
+      "💡 据说画圆技术和工作效率成反比",
+      "🎯 画得越圆，下班越早（迷信）",
+      "🔮 传说画出完美圆的人都升职了",
+      "⚡ 隐身模式+ESC键=终极摸鱼神器",
+      "🎪 画圆时想象自己在画年终奖",
+      "🌟 每画一个圆，就少写一行代码",
+      "🎨 可以连续画圆叠加，打分后重画会清空",
+      "🌈 完成打分后再画新圆会重新开始",
+      "🥷 隐身模式让你摸鱼更安全",
+      "🖥️ XP桌面伪装，老板永远不会发现"
+    ]
+    return tips[Math.floor(Math.random() * tips.length)]
+  }
+
+  // 设置canvas尺寸和事件监听
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
 
-    // 初始化黑色背景
-    const ctx = canvas.getContext("2d")
-    if (ctx) {
-      ctx.fillStyle = "#0a0a0a"
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+    // 动态设置canvas尺寸以适应容器
+    const resizeCanvas = () => {
+      const container = canvas.parentElement
+      if (container) {
+        const containerWidth = container.clientWidth
+        const aspectRatio = 5 / 3 // 宽高比
+        canvas.width = Math.min(containerWidth - 4, 1000) // 减去边框
+        canvas.height = Math.min(canvas.width / aspectRatio, 600)
+        
+        // 重新绘制背景
+        const ctx = canvas.getContext("2d")
+        if (ctx) {
+          ctx.fillStyle = "#0a0a0a"
+          ctx.fillRect(0, 0, canvas.width, canvas.height)
+          
+          // 重新绘制所有保存的路径
+          redrawAllPaths(ctx, allDrawings)
+        }
+      }
     }
+
+    // 初始化尺寸
+    resizeCanvas()
+
+    // 添加窗口大小变化监听
+    window.addEventListener("resize", resizeCanvas)
 
     canvas.addEventListener("mousedown", startDrawing)
     canvas.addEventListener("mousemove", draw)
@@ -296,51 +468,108 @@ export default function CircleDrawingGame() {
     canvas.addEventListener("mouseleave", stopDrawing)
 
     return () => {
+      window.removeEventListener("resize", resizeCanvas)
       canvas.removeEventListener("mousedown", startDrawing)
       canvas.removeEventListener("mousemove", draw)
       canvas.removeEventListener("mouseup", stopDrawing)
       canvas.removeEventListener("mouseleave", stopDrawing)
     }
-  }, [startDrawing, draw, stopDrawing])
+  }, [startDrawing, draw, stopDrawing, allDrawings, redrawAllPaths])
+
+  // 键盘快捷键监听
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // ESC键快速切换遮罩
+      if (e.key === "Escape") {
+        setShowMask(prev => !prev)
+        e.preventDefault()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyPress)
+    return () => {
+      window.removeEventListener("keydown", handleKeyPress)
+    }
+  }, [])
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen transition-all duration-500 bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
       <div className="max-w-4xl mx-auto">
-        <Card className="mb-6">
-          <CardHeader className="text-center">
-            <CardTitle className="text-3xl font-bold text-gray-800">画圈挑战</CardTitle>
-            <CardDescription className="text-lg">用鼠标在下方画一个完美的圆圈，系统会给你的圆圈打分！</CardDescription>
+        <Card className="mb-6 bg-black/20 backdrop-blur-sm border-purple-500/20">
+          <CardHeader className="text-center relative">
+            <Button 
+              onClick={() => setShowMask(true)}
+              variant="ghost" 
+              size="sm"
+              className="absolute top-2 right-2 text-xs text-white"
+            >
+              <EyeOff className="w-4 h-4" />
+              逃生门
+            </Button>
+            
+            <CardTitle className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">
+              🎮 摸鱼神器·画圈挑战
+            </CardTitle>
+            <CardDescription className="text-lg text-purple-200">
+              在老板不注意的时候，用鼠标画个炫酷发光圆圈！🌟
+            </CardDescription>
+                         <div className="flex items-center justify-center gap-2 mt-2 text-sm text-purple-300">
+               <Coffee className="w-4 h-4" />
+               <span>已摸鱼 {drawCount} 次 | 继续加油！ | 按ESC切换伪装</span>
+             </div>
           </CardHeader>
           <CardContent>
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center gap-4">
                 {bestScore > 0 && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-yellow-300">
                     <Trophy className="w-5 h-5 text-yellow-500" />
-                    <span className="font-semibold">最高分: {bestScore}</span>
+                    <span className="font-semibold">摸鱼记录: {bestScore}分</span>
                   </div>
                 )}
               </div>
-              <Button onClick={clearCanvas} variant="outline" className="flex items-center gap-2 bg-transparent">
+                            <Button 
+                onClick={clearCanvas} 
+                variant="secondary"
+                className="flex items-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border-purple-400/30 text-purple-200"
+              >
                 <RotateCcw className="w-4 h-4" />
-                重新开始
+                清空重摸
               </Button>
             </div>
 
             {/* 画布 */}
-            <div className="relative border-2 border-gray-600 rounded-lg overflow-hidden bg-gray-900 shadow-inner">
+            <div className="relative border-2 rounded-lg overflow-hidden shadow-inner border-purple-500/30 bg-gray-900">
               <canvas
                 ref={canvasRef}
-                width={800}
-                height={500}
-                className="block cursor-crosshair"
+                className="block cursor-crosshair w-full h-auto max-w-full"
                 style={{ touchAction: "none" }}
               />
 
               {/* 提示文字 */}
-              {points.length === 0 && !isDrawing && (
+              {points.length === 0 && !isDrawing && allDrawings.length === 0 && score === null && (
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  <div className="text-gray-400 text-xl font-medium">点击并拖拽鼠标画一个炫酷的发光圆圈</div>
+                  <div className="text-xl font-medium text-purple-300">
+                    点击拖拽画个发光圆圈，开始你的摸鱼时光✨
+                  </div>
+                </div>
+              )}
+              
+              {/* 继续绘制提示 */}
+              {points.length === 0 && !isDrawing && allDrawings.length > 0 && score === null && (
+                <div className="absolute top-4 left-4 pointer-events-none">
+                  <div className="text-sm px-3 py-1 rounded-full bg-purple-600/20 text-purple-300 border border-purple-500/30">
+                    🎨 已摸鱼 {allDrawings.length} 个圆圈
+                  </div>
+                </div>
+              )}
+
+              {/* 重新开始提示 */}
+              {points.length === 0 && !isDrawing && score !== null && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="text-xl font-medium text-purple-300">
+                    点击重新绘制，开始新的摸鱼挑战🎯
+                  </div>
                 </div>
               )}
             </div>
@@ -348,19 +577,19 @@ export default function CircleDrawingGame() {
             {/* 评分显示 */}
             {score !== null && (
               <div className="mt-6 text-center">
-                <div className="inline-flex items-center gap-4 bg-white rounded-lg p-6 shadow-lg">
+                <div className="inline-flex items-center gap-4 rounded-lg p-6 shadow-lg bg-black/30 backdrop-blur-sm border border-purple-500/20">
                   <div className="text-center">
-                    <div className="text-4xl font-bold text-gray-800 mb-2">{score}分</div>
-                    <Badge className={`${getScoreInfo(score).color} text-white`}>{getScoreInfo(score).level}</Badge>
+                    <div className="text-4xl font-bold mb-2 text-white">
+                      {score}分 {getScoreInfo(score).emoji}
+                    </div>
+                    <Badge className={`${getScoreInfo(score).color} text-white`}>
+                      {getScoreInfo(score).level}
+                    </Badge>
                   </div>
-                  <div className="text-left text-sm text-gray-600">
+                  <div className="text-left text-sm text-purple-200">
                     <div>绘制点数: {points.length}</div>
-                    <div className="mt-1">
-                      {score >= 90 && "哇！几乎完美的圆形！"}
-                      {score >= 80 && score < 90 && "很棒的圆形！"}
-                      {score >= 70 && score < 80 && "不错的尝试！"}
-                      {score >= 60 && score < 70 && "还需要多练习哦"}
-                      {score < 60 && "继续努力，你可以做得更好！"}
+                    <div className="mt-1 max-w-xs">
+                      {getMagicComment(score)}
                     </div>
                   </div>
                 </div>
@@ -368,12 +597,32 @@ export default function CircleDrawingGame() {
             )}
 
             {/* 使用说明 */}
-            <div className="mt-6 text-center text-sm text-gray-600">
-              <p>💡 小贴士：画圆时保持匀速，尽量让起点和终点重合，这样能获得更高分数！</p>
+            <div className="mt-6 text-center text-sm text-purple-300">
+              <p>{getRandomTip()}</p>
             </div>
           </CardContent>
         </Card>
       </div>
+      
+      {/* 伪装遮罩 */}
+      {showMask && (
+        <div 
+          className="fixed inset-0 z-[9999] cursor-pointer"
+          style={{
+            backgroundImage: "url('/xp2.jpg')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundRepeat: "no-repeat"
+          }}
+          onDoubleClick={() => setShowMask(false)}
+        >
+          {/* 操作提示 */}
+          <div className="absolute bottom-4 right-4 bg-black/70 text-white px-3 py-2 rounded text-sm opacity-30 hover:opacity-100 transition-opacity">
+            <div>ESC</div>
+            {/* <div className="text-xs text-gray-300 mt-1">🥷 伪装模式已激活</div> */}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
